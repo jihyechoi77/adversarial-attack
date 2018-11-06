@@ -2,6 +2,8 @@
 
 ## Requirements
 
-Download the libraries
-[cleverhans](https://github.com/tensorflow/cleverhans)
-[facenet](https://github.com/davidsandberg/facenet)
+Download the libraries:
+
+- [cleverhans](https://github.com/tensorflow/cleverhans)
+
+- [facenet](https://github.com/davidsandberg/facenet)
