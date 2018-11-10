@@ -1,3 +1,5 @@
+from __future__ import division
+
 import keras
 from keras.preprocessing.image import load_img, img_to_array
 import numpy as np
@@ -33,7 +35,7 @@ class DataGenerator(keras.utils.Sequence):
         'Generate one batch of data'
         # Generate indexes of the batch
         # indexes = self.indexes[index*self.batch_size:(index+1)*self.batch_size]
-        indexes = self.indexes[index * self.batch_size:min((index + 1) * self.batch_size, len(self.list_IDs) - 1)]
+        indexes = self.indexes[index*self.batch_size:min((index+1)*self.batch_size, len(self.list_IDs))]
 
         # Find list of IDs
         list_IDs_temp = [self.list_IDs[k] for k in indexes]
@@ -52,11 +54,11 @@ class DataGenerator(keras.utils.Sequence):
     def __data_generation(self, list_IDs_temp):
         'Generates data containing batch_size samples' # X : (n_samples, *dim, n_channels)
         # Initialization
-        X = np.empty((self.batch_size, self.dim[0], self.dim[1], self.n_channels))
+        X = np.empty((len(list_IDs_temp), self.dim[0], self.dim[1], self.n_channels))
         if self.is_multilab:
-            y = np.empty((self.batch_size, 40), dtype=int)
+            y = np.empty((len(list_IDs_temp), 40), dtype=int)
         else:
-            y = np.empty((self.batch_size), dtype=int)
+            y = np.empty(len(list_IDs_temp), dtype=int)
 
         # Generate data
         for i, ID in enumerate(list_IDs_temp):
