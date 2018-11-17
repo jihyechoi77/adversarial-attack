@@ -1,4 +1,4 @@
-# Facial Attributes and their Robustness against Adversarial Examples
+# Facial Attributes and their Robustness against Adversarial Manipulation
 
 ## Requirements
 
