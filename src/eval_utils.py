@@ -97,7 +97,7 @@ def plot_roc_multiple(attributes, truth, pred, savefig):
         plt.figure(fid1)
         fpr, tpr, _ = roc_curve(truth[:, i], pred[:, i])
         roc_auc = np.append(roc_auc, auc(fpr, tpr))
-        plt.plot(fpr, tpr, label="ROC %s (AUC = %0.3f)" % (attributes[i], roc_auc[-1]))
+        plt.plot(fpr, tpr, label="%s (AUC = %0.3f)" % (attributes[i], roc_auc[-1]))
         plt.title('ROC curve of multilabel attribute classifier')
         lgd3 = plt.legend(prop=fontP, bbox_to_anchor=(1.05, 1), loc=2, borderaxespad=0.)
         art3.append(lgd3)

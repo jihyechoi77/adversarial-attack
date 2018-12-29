@@ -8,17 +8,19 @@ import argparse
 import random
 import facenet
 from keras.models import Model
+from keras.optimizers import SGD
 from batch_generator import DataGenerator
 
 
 def load_PretrainedModel(model_type, input_dim, output_dim):
-# reference: https://keras.io/applications/#inceptionv3
+    # reference: https://keras.io/applications/#inceptionv3
     from keras.layers import Flatten, Dense, GlobalAveragePooling2D   
 
     # create the base pre-trained model
-    if model_type == 'VGG16' :
+    if model_type == 'VGG16':
         from keras.applications.vgg16 import VGG16
-        base_model = VGG16(weights='imagenet', include_top=False, input_shape=(input_dim,input_dim,3))
+        base_model = VGG16(weights=None, include_top=False, input_shape=(input_dim,input_dim,3))
+        base_model.load_weights('/home/jihyec/adversarial-ml/vgg_keras_tf/rcmalli_vggface_tf_notop_vgg16.h5')
         feat_dim = 4096
     elif model_type == 'InceptionResNetV2':
         from keras.applications.inception_resnet_v2 import InceptionResNetV2
@@ -31,7 +33,7 @@ def load_PretrainedModel(model_type, input_dim, output_dim):
 
     # add a global spatial average pooling layer
     x = base_model.output
-    if model_type=='VGG16':
+    if model_type == 'VGG16':
         x = Flatten(name='flatten')(x)
         x = Dense(feat_dim, activation='relu', name='fc1')(x)
         x = Dense(feat_dim, activation='relu', name='fc2')(x)
@@ -47,6 +49,41 @@ def load_PretrainedModel(model_type, input_dim, output_dim):
     return base_model, model
 
 
+def get_BatchGenerator(args):
+    # prepare python batch generators for training and validation
+
+    if 'celeba' in args.data_dir:
+        img_list_train = facenet.get_image_paths(os.path.join(args.data_dir, 'train'))
+        img_list_val = facenet.get_image_paths(os.path.join(args.data_dir, 'validation'))
+        assert len(img_list_train) > 0, 'The training set should not be empty'
+        partition = {'train': img_list_train, 'validation': img_list_val}  # IDs
+        params = {'dim': (args.data_dim, args.data_dim),
+                  'batch_size': args.batch_size, 'shuffle': True}
+
+        train_generator = DataGenerator(partition['train'], args.label_all, **params)
+        validation_generator = DataGenerator(partition['validation'], args.label_all, **params)
+
+    else:
+        from keras.preprocessing.image import ImageDataGenerator
+        train_datagen = ImageDataGenerator(
+            rescale=1. / 255,
+            shear_range=0.1,
+            zoom_range=0.1,
+            horizontal_flip=True)
+
+        test_datagen = ImageDataGenerator(rescale=1. / 255)
+
+        train_generator = train_datagen.flow_from_directory(os.path.join(args.data_dir, 'train'),
+                                                            target_size=(args.data_dim, args.data_dim),
+                                                            batch_size=args.batch_size, class_mode='categorical')
+
+        validation_generator = test_datagen.flow_from_directory(os.path.join(args.data_dir, 'validation'),
+                                                                target_size=(args.data_dim, args.data_dim),
+                                                                batch_size=args.batch_size, class_mode='categorical')
+
+    return train_generator, validation_generator
+
+
 def model_train(base_model, model, train_generator, validation_generator, args):
     # reference: https://keras.io/applications/#vgg16
 
@@ -60,8 +97,10 @@ def model_train(base_model, model, train_generator, validation_generator, args):
     if args.loss=='binary_crossentropy_custom':
         from train_utils import binary_crossentropy_custom
         model.compile(optimizer='adam', loss=binary_crossentropy_custom, metrics=['binary_accuracy'])
-    else:
+    elif args.loss=='binary_crossentropy':
         model.compile(optimizer='adam', loss=args.loss, metrics=['binary_accuracy'])
+    else:
+        model.compile(optimizer='adam', loss=args.loss, metrics=['acc'])
 
     # train the model on the new data for a few epochs
     model.fit_generator(train_generator,
@@ -95,12 +134,14 @@ def model_train(base_model, model, train_generator, validation_generator, args):
 
     # we need to recompile the model for these modifications to take effect
     # we use SGD with a low learning rate
-    from keras.optimizers import SGD
+    sgd = SGD(lr=0.01, momentum=0.9)
     if args.loss=='binary_crossentropy_custom':
         from train_utils import binary_crossentropy_custom
-        model.compile(optimizer=SGD(lr=0.0001, momentum=0.9), loss=binary_crossentropy_custom, metrics=['binary_accuracy'])
+        model.compile(optimizer=sgd, loss=binary_crossentropy_custom, metrics=['binary_accuracy'])
+    elif args.loss=='binary_crossentropy':
+        model.compile(optimizer=sgd, loss=args.loss, metrics=['binary_accuracy'])
     else:
-        model.compile(optimizer=SGD(lr=0.0001, momentum=0.9), loss=args.loss, metrics=['binary_accuracy'])
+        model.compile(optimizer=sgd, loss=args.loss, metrics=['acc'])
 
     # we train our model again (this time fine-tuning the top 2 inception blocks
     # alongside the top Dense layers
@@ -117,28 +158,22 @@ def main(args):
     random.seed(args.seed)
 
     # prepare pretrained model
-    base_model, model = load_PretrainedModel(args.model_type, args.data_dim, output_dim=40)
+    if args.train_multilab:
+        # load Nx40 labels from mat file
+        # mat file is located in data_dir
+        loaded = loadmat(os.path.join(args.data_dir, 'label_all.mat'))
+        args.label_all = np.array(loaded['label'])
 
+        base_model, model = load_PretrainedModel(args.model_type, args.data_dim, output_dim=40)
+    else:
+        base_model, model = load_PretrainedModel(args.model_type, args.data_dim, output_dim=2622)
 
-    # load Nx40 labels from mat file
-    # mat file is located in data_dir
-    loaded = loadmat(os.path.join(args.data_dir, 'label_all.mat'))
-    args.label_all = np.array(loaded['label'])
-
-    # prepare python batch generators for training and validation
-    img_list_train = facenet.get_image_paths(os.path.join(args.data_dir,'train'))
-    img_list_val = facenet.get_image_paths(os.path.join(args.data_dir, 'validation'))
-    assert len(img_list_train) > 0, 'The training set should not be empty'
-    partition = {'train': img_list_train, 'validation': img_list_val} # IDs
-    params = {'dim': (args.data_dim, args.data_dim),
-              'batch_size': args.batch_size, 'shuffle': True}
-
-    train_generator = DataGenerator(partition['train'], args.label_all, **params)
-    validation_generator = DataGenerator(partition['validation'], args.label_all, **params)
+    train_generator, validation_generator = get_BatchGenerator(args)
 
     # train
     trained_model = model_train(base_model, model, train_generator, validation_generator, args)
-    trained_model.save("./model/%s.h5" % (args.save_name))
+    trained_model.save("./model/%s.h5" % args.save_name)
+    # TODO: add option for further training with trained models.
 
 
 def parse_arguments(argv):
@@ -153,7 +188,12 @@ def parse_arguments(argv):
     parser.add_argument('--loss', type=str, help='Training loss: either binary_crossentropy or binary_crossentropy_custom.', default='binary_crossentropy')
     parser.add_argument('--save_name', type=str, help='Name to save the trained model.', default='VGG16-dim160-attrClassifier')
     parser.add_argument('--steps_per_epoch', type=int, default=500)
+    parser.add_argument('--train_multilab', type=str2bool, default=False)
     return parser.parse_args(argv)
+
+
+def str2bool(value):
+    return value.lower == 'true'
 
 
 if __name__ == '__main__':

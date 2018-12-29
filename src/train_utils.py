@@ -4,7 +4,7 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 from keras import backend as K
-
+import tensorflow as tf
 import numpy as np
 import random
 import scipy.io
@@ -22,6 +22,8 @@ def binary_crossentropy_custom(y_true, y_pred):
 
     return K.mean(bin_cross, axis=-1)
     #return K.mean(K.binary_crossentropy(y_true, y_pred), axis=-1)
+
+
 
 
 def shuffle_dataset(X, y):
@@ -141,4 +143,5 @@ def add_feat_eng_and_fcl(model):
     model.layers[-10].set_weights(weights=w)
 
     return model
+
 
