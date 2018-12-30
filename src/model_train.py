@@ -20,7 +20,8 @@ def load_PretrainedModel(model_type, input_dim, output_dim):
     if model_type == 'VGG16':
         from keras.applications.vgg16 import VGG16
         base_model = VGG16(weights=None, include_top=False, input_shape=(input_dim,input_dim,3))
-        base_model.load_weights('/home/jihyec/adversarial-ml/vgg_keras_tf/rcmalli_vggface_tf_notop_vgg16.h5')
+        # base_model.load_weights('/home/jihyec/adversarial-ml/vgg_keras_tf/rcmalli_vggface_tf_notop_vgg16.h5') # when running on devbox
+        base_model.load_weights('/data/jihyec/rcmalli_vggface_tf_notop_vgg16.h5') # when running on grey4
         feat_dim = 4096
     elif model_type == 'InceptionResNetV2':
         from keras.applications.inception_resnet_v2 import InceptionResNetV2
@@ -134,7 +135,7 @@ def model_train(base_model, model, train_generator, validation_generator, args):
 
     # we need to recompile the model for these modifications to take effect
     # we use SGD with a low learning rate
-    sgd = SGD(lr=0.01, momentum=0.9)
+    sgd = SGD(lr=0.0001, momentum=0.9)
     if args.loss=='binary_crossentropy_custom':
         from train_utils import binary_crossentropy_custom
         model.compile(optimizer=sgd, loss=binary_crossentropy_custom, metrics=['binary_accuracy'])
@@ -161,7 +162,7 @@ def main(args):
     if args.train_multilab:
         # load Nx40 labels from mat file
         # mat file is located in data_dir
-        loaded = loadmat(os.path.join(args.data_dir, 'label_all.mat'))
+        loaded = loadmat('../data/label_all.mat')
         args.label_all = np.array(loaded['label'])
 
         base_model, model = load_PretrainedModel(args.model_type, args.data_dim, output_dim=40)
@@ -172,23 +173,23 @@ def main(args):
 
     # train
     trained_model = model_train(base_model, model, train_generator, validation_generator, args)
-    trained_model.save("./model/%s.h5" % args.save_name)
+    trained_model.save("../model/%s.h5" % args.save_name)
     # TODO: add option for further training with trained models.
 
 
 def parse_arguments(argv):
     parser = argparse.ArgumentParser()
 
-    parser.add_argument('--data_dir', type=str, help='Path to the data directory containing aligned face images.', default='/home/jihyec/data/celeba/img_align_celeba-dim160-all')
+    parser.add_argument('--data_dir', type=str, help='Path to the data directory containing aligned face images.', default='/data/jihyec/data/celeba/img_align_celeba-dim160') # img_align_celeba-dim160-all when running on devbox
     parser.add_argument('--model_type', type=str, help='Possible model types are VGG16, InceptionResNetV2, InceptionV3.', default='InveptionV3')
     parser.add_argument('--seed', type=int, help='Random seed.', default=666)
     parser.add_argument('--epoch', type=int, help='Number of epochs.', default=10)
-    parser.add_argument('--batch_size', type=int, help='Batch size.', default=200)
+    parser.add_argument('--batch_size', type=int, help='Batch size.', default=300)
     parser.add_argument('--data_dim', type=int, help='Dimension of images.', default=160)
     parser.add_argument('--loss', type=str, help='Training loss: either binary_crossentropy or binary_crossentropy_custom.', default='binary_crossentropy')
     parser.add_argument('--save_name', type=str, help='Name to save the trained model.', default='VGG16-dim160-attrClassifier')
     parser.add_argument('--steps_per_epoch', type=int, default=500)
-    parser.add_argument('--train_multilab', type=str2bool, default=False)
+    parser.add_argument('--train_multilab', type=str2bool, default=True)
     return parser.parse_args(argv)
 
 

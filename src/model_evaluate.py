@@ -34,8 +34,8 @@ def main(args):
         model = load_model(model_path + '.h5', custom_objects={'binary_crossentropy_custom': binary_crossentropy_custom})
 
     # load Nx40 labels from mat file
-    # mat file is located in data_dir
-    loaded = loadmat(os.path.join(args.data_dir, 'label_all.mat'))
+    # mat file is located under the data directory
+    loaded = loadmat('../data/label_all.mat')
     args.label_all = np.array(loaded['label'])
 
     # custom batch generator
@@ -54,9 +54,9 @@ def main(args):
 
 def parse_arguments(argv):
     parser = argparse.ArgumentParser()
-    parser.add_argument('--data_dir', type=str, help='Path to the data', default='/home/jihyec/data/celeba/img_align_celeba-dim160-all')
+    parser.add_argument('--data_dir', type=str, help='Path to the data', default='/data/jihyec/data/celeba/img_align_celeba-dim160')
     parser.add_argument('--model_dir', type=str, help='Directory where the saved model is located.',
-                        default='/home/jihyec/adversarial-ml/vgg_keras_tf/model')
+                        default='/data/jihyec/adversarial-attack/model')
     parser.add_argument('--model_name', type=str, help='Name of the saved model.', default='VGG16-dim160-attrClassifier')
     parser.add_argument('--batch_size', type=int, help='Test batch size.', default=400)
     parser.add_argument('--data_dim', type=int, help='Input data size.', default=160)
