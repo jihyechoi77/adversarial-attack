@@ -14,8 +14,8 @@ def get_label_from_filename(list_IDs, label_all):
 
     # Generate data
     for i, ID in enumerate(list_IDs):
-        img_num = int(os.path.split(ID)[-1].split('.')[0])  # extract image number from filename
-        y[i] = np.transpose(label_all[img_num - 1])
+        img_idx = int(os.path.split(ID)[-1].split('.')[0])  # extract image index from filename
+        y[i] = np.transpose(label_all[img_idx - 1])
 
     return y
 

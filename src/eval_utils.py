@@ -83,7 +83,9 @@ def plot_roc(modeltype, attribute, truth, pred):
 def plot_roc_multiple(attributes, truth, pred, savefig):
     # truth and pred: N by 40 array
     num_attr = len(attributes)
-    roc_auc = []
+    auc_attr = [] # auc of 40 attributes
+    thresh_attr = [] # threshold at EER point of 40 attributes
+    eer_attr = [] # EER of 40 attributes
 
     fid1 = prepare_figure(fid=None)
     fid2 = prepare_figure(fid=None)
@@ -95,23 +97,29 @@ def plot_roc_multiple(attributes, truth, pred, savefig):
     art4 = []
     for i in range(0, num_attr):
         plt.figure(fid1)
-        fpr, tpr, _ = roc_curve(truth[:, i], pred[:, i])
-        roc_auc = np.append(roc_auc, auc(fpr, tpr))
-        plt.plot(fpr, tpr, label="%s (AUC = %0.3f)" % (attributes[i], roc_auc[-1]))
+        fpr, tpr, threshold = roc_curve(truth[:, i], pred[:, i])
+        auc_attr = np.append(auc_attr, auc(fpr, tpr))
+        plt.plot(fpr, tpr, label="%s (AUC = %0.3f)" % (attributes[i], auc_attr[-1]))
         plt.title('ROC curve of multilabel attribute classifier')
         lgd3 = plt.legend(prop=fontP, bbox_to_anchor=(1.05, 1), loc=2, borderaxespad=0.)
         art3.append(lgd3)
         plt.savefig(savefig+'_roc.png', additional_artists=art3, bbox_inches="tight")
 
         plt.figure(fid2)
-        plt.plot(fpr, tpr, label="ROC %s (AUC = %0.3f)" % (attributes[i], roc_auc[-1])) # , roc_auc[-1]
+        plt.plot(fpr, tpr, label="ROC %s (AUC = %0.3f)" % (attributes[i], auc_attr[-1]))
         plt.title('ROC curve (zoomed in at top left) of multilabel attribute classifier')
         # plt.legend(loc='best')
         lgd4 = plt.legend(prop=fontP, bbox_to_anchor=(1.05, 1), loc=2, borderaxespad=0.)
         art4.append(lgd4)
         plt.savefig(savefig+'_roc_zoomed.png', additional_artists=art4, bbox_inches="tight")
 
-    return roc_auc
+        # compute threshold, fpr, tpr at EER point
+        fnr = 1 - tpr
+        eer_idx = np.nanargmin(np.absolute((fnr - fpr)))
+        thresh_attr = np.append(thresh_attr, eer_idx)
+        eer_attr = np.append(eer_attr, fpr(eer_idx))
+
+    return auc_attr, thresh_attr, eer_attr
 
 
 def compute_accuracy(truth, pred):
@@ -132,20 +140,20 @@ def evaluate_multilab(preds, truth, save_name):
          'Straight_Hair', 'Wavy_Hair', 'Wearing_Earrings', 'Wearing_Hat', 'Wearing_Lipstick',  # 32~36
          'Wearing_Necklace', 'Wearing_Necktie', 'Young'])  # 37~39
 
-    roc_auc = plot_roc_multiple(attributes=attributes, pred=preds, truth=truth,
+    auc_attr, thresh_attr, eer_attr = plot_roc_multiple(attributes=attributes, pred=preds, truth=truth,
                                 # savefig="/data/jihyec/vgg_keras_tf/trained_models/figures/%s_notop_on_celeba" % modelname)
                                 savefig=save_name)
 
-    preds[preds >= 0.5] = 1
-    preds[preds < 0.5] = 0
+    # preds[preds >= 0.5] = 1
+    # preds[preds < 0.5] = 0
 
-    accur = []  # per-class accuracy
+    accur_attr = []  # accuracy of 40 attributes
     for i in range(0, 40):
-        accur = np.append(accur, compute_accuracy(truth=truth[:, i], pred=preds[:, i]))
+        accur_attr = np.append(accur_attr, compute_accuracy(truth[:, i], preds[:, i] >= thresh_attr[i]))
 
     # result_save_file = "/data/jihyec/vgg_keras_tf/trained_models/%s_notop_on_celeba_accuracy.mat" % modelname
-    result_save_file = save_name + '_accuracy.mat'
-    scipy.io.savemat(result_save_file, mdict={'accuracy': accur, 'auc': roc_auc, 'pred': preds, 'truth': truth})
+    result_save_file = save_name + '_eval_result.mat'
+    scipy.io.savemat(result_save_file, mdict={'accuracy': accur_attr, 'auc': auc_attr, 'threshold': thresh_attr, 'eer': eer_attr, 'pred': preds, 'truth': truth})
 
     top_unbal_attr_idx = (np.array(roc_auc)).argsort()[:8]
     print('\n top 8 unbalanced attribute indices...')
@@ -153,7 +161,7 @@ def evaluate_multilab(preds, truth, save_name):
     print('\n and their AUC values...')
     print(roc_auc[top_unbal_attr_idx])
 
-    return accur, roc_auc, top_unbal_attr_idx
+    return accur, roc_attr, top_unbal_attr_idx
 
 
 
