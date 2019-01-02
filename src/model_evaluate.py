@@ -1,4 +1,4 @@
-from keras.models import load_model
+from keras.models import Model, load_model
 import sys
 import os
 import argparse
@@ -6,7 +6,7 @@ import numpy as np
 from scipy.io import loadmat
 from batch_generator import DataGenerator
 import facenet
-from eval_utils import evaluate_multilab
+from eval_utils import evaluate_multilab, compute_attr_embedding
 
 
 def get_label_from_filename(list_IDs, label_all):
@@ -41,12 +41,16 @@ def main(args):
     # custom batch generator
     img_list = facenet.get_image_paths(os.path.join(args.data_dir, 'test'))
     assert len(img_list) > 0, 'The training set should not be empty'
+    """
+    partition = {'test': img_list}  # IDs
     params = {'dim': (args.data_dim, args.data_dim),
               'batch_size': args.batch_size, 'shuffle': False}
 
-    test_generator = DataGenerator(img_list, args.label_all, **params)
-    prediction = model.predict_generator(test_generator, use_multiprocessing=False, verbose=0)
-
+    test_generator = DataGenerator(partition['test'], args.label_all, **params)
+    prediction = model.predict_generator(test_generator, use_multiprocessing=False)
+    # prediction = model.predict_generator(test_generator, use_multiprocessing=False, verbose=0)
+    """
+    prediction = compute_attr_embedding(model, path=img_list)
     # compute label-wise performance
     truth = get_label_from_filename(img_list, args.label_all)
     evaluate_multilab(prediction, truth, save_name=model_path)

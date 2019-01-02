@@ -135,7 +135,7 @@ def model_train(base_model, model, train_generator, validation_generator, args):
 
     # we need to recompile the model for these modifications to take effect
     # we use SGD with a low learning rate
-    sgd = SGD(lr=0.0001, momentum=0.9)
+    sgd = SGD(lr=0.0002, momentum=0.9)
     if args.loss=='binary_crossentropy_custom':
         from train_utils import binary_crossentropy_custom
         model.compile(optimizer=sgd, loss=binary_crossentropy_custom, metrics=['binary_accuracy'])
@@ -181,7 +181,7 @@ def parse_arguments(argv):
     parser = argparse.ArgumentParser()
 
     parser.add_argument('--data_dir', type=str, help='Path to the data directory containing aligned face images.', default='/data/jihyec/data/celeba/img_align_celeba-dim160') # img_align_celeba-dim160-all when running on devbox
-    parser.add_argument('--model_type', type=str, help='Possible model types are VGG16, InceptionResNetV2, InceptionV3.', default='InveptionV3')
+    parser.add_argument('--model_type', type=str, help='Possible model types are VGG16, InceptionResNetV2, InceptionV3.', default='VGG16')
     parser.add_argument('--seed', type=int, help='Random seed.', default=666)
     parser.add_argument('--epoch', type=int, help='Number of epochs.', default=10)
     parser.add_argument('--batch_size', type=int, help='Batch size.', default=300)

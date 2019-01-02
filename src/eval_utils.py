@@ -11,6 +11,8 @@ from matplotlib.font_manager import FontProperties
 #plt.switch_backend('Agg')
 import numpy as np
 import scipy
+import math
+from keras.preprocessing.image import load_img, img_to_array
 
 # reference about using legend: http://jb-blog.readthedocs.io/en/latest/posts/0012-matplotlib-legend-outdide-plot.html
 
@@ -116,8 +118,8 @@ def plot_roc_multiple(attributes, truth, pred, savefig):
         # compute threshold, fpr, tpr at EER point
         fnr = 1 - tpr
         eer_idx = np.nanargmin(np.absolute((fnr - fpr)))
-        thresh_attr = np.append(thresh_attr, eer_idx)
-        eer_attr = np.append(eer_attr, fpr(eer_idx))
+        thresh_attr = np.append(thresh_attr, threshold[eer_idx])
+        eer_attr = np.append(eer_attr, fpr[eer_idx])
 
     return auc_attr, thresh_attr, eer_attr
 
@@ -155,17 +157,34 @@ def evaluate_multilab(preds, truth, save_name):
     result_save_file = save_name + '_eval_result.mat'
     scipy.io.savemat(result_save_file, mdict={'accuracy': accur_attr, 'auc': auc_attr, 'threshold': thresh_attr, 'eer': eer_attr, 'pred': preds, 'truth': truth})
 
-    top_unbal_attr_idx = (np.array(roc_auc)).argsort()[:8]
+    top_unbal_attr_idx = (np.array(auc_attr)).argsort()[:8]
     print('\n top 8 unbalanced attribute indices...')
     print(top_unbal_attr_idx)
     print('\n and their AUC values...')
-    print(roc_auc[top_unbal_attr_idx])
+    print(auc_attr[top_unbal_attr_idx])
 
-    return accur, roc_attr, top_unbal_attr_idx
-
-
+    return accur_attr, auc_attr, top_unbal_attr_idx
 
 
+
+def compute_attr_embedding(model, path):
+    # path: array of paths to test data
+    batch_size = 400
+    num_images = len(path)
+    num_batches = int(math.ceil(1.0*num_images/batch_size))
+    emb_array = np.zeros((num_images, 40)) # 40: embedding_size
+    for i in range(num_batches):
+        start_idx = i*batch_size
+        end_idx = min((i+1)*batch_size, num_images)
+        path_batch = path[start_idx:end_idx]
+        
+        # image_batch = np.empty((len(path_batch), (np.shape(load_img(path_batch[0])))))
+        image_batch = np.empty((len(path_batch), 160, 160, 3))
+        for j in range(len(path_batch)):
+            image_batch[j] = img_to_array(load_img(path_batch[j])) / 255
+        emb_array[start_idx:end_idx, ] = model.predict(image_batch)
+
+    return emb_array
 
 
 
