@@ -33,7 +33,7 @@ def get_filename(key):
     return filename + '.npy'
 
 
-def extract_tensors_from_checkpoint_file(filename, output_folder):
+def extract_tensors_from_ckpt_file(filename, output_folder):
     reader = tf.train.NewCheckpointReader(filename)
 
     for key in reader.get_variable_to_shape_map():
@@ -70,7 +70,7 @@ def main(args):
     if not os.path.exists(npy_weights_dir):
         os.makedirs(npy_weights_dir)
 
-    extract_tensors_from_checkpoint_file(os.path.join(args.tf_model_dir,args.tf_modelname), npy_weights_dir)
+    extract_tensors_from_ckpt_file(os.path.join(args.tf_model_dir,args.tf_modelname), npy_weights_dir)
     
     model = InceptionResNetV1()
     # model.summary()
