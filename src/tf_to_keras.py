@@ -72,7 +72,7 @@ def main(args):
 
     extract_tensors_from_ckpt_file(os.path.join(args.tf_model_dir,args.tf_modelname), npy_weights_dir)
     
-    model = InceptionResNetV1()
+    model = InceptionResNetV1(classes=512) # classes=128 for model-20170512-110547.h5
     # model.summary()
 
     model = load_npy_weights(model, npy_weights_dir)
