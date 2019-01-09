@@ -33,18 +33,19 @@ def plot_roc_general(truth, pred, savefig):
     fpr, tpr, threshold = roc_curve(truth, pred)
     roc_auc = auc(fpr, tpr)
 
-    prepare_figure(fid=None)
-    plt.plot(fpr, tpr, label="ROC face verifier (AUC = %0.3f" % roc_auc)
-    # plt.title('ROC curve of face verification')
-    plt.legend(loc='best')
-    plt.savefig(savefig)
+    if savefig is not None:
+        prepare_figure(fid=None)
+        plt.plot(fpr, tpr, label="ROC face verifier (AUC = %0.3f" % roc_auc)
+        # plt.title('ROC curve of face verification')
+        plt.legend(loc='best')
+        plt.savefig(savefig)
 
     # compute threshold, fpr, tpr at EER point
     fnr = 1 - tpr
     eer_idx = np.nanargmin(np.absolute((fnr - fpr)))
     thresh = threshold[eer_idx]
     # eer = fpr[eer_idx]
-
+ 
     return thresh, fpr[eer_idx], tpr[eer_idx]
 
 
