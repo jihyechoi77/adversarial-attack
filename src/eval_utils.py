@@ -29,14 +29,23 @@ def prepare_figure(fid):
 
 def plot_roc_general(truth, pred, savefig):
     # truth and pred: N by 1 array
-    fpr, tpr, _ = roc_curve(truth, pred)
+
+    fpr, tpr, threshold = roc_curve(truth, pred)
     roc_auc = auc(fpr, tpr)
 
     prepare_figure(fid=None)
     plt.plot(fpr, tpr, label="ROC face verifier (AUC = %0.3f" % roc_auc)
-    plt.title('ROC curve of face verifier trained on the easy set')
+    # plt.title('ROC curve of face verification')
     plt.legend(loc='best')
     plt.savefig(savefig)
+
+    # compute threshold, fpr, tpr at EER point
+    fnr = 1 - tpr
+    eer_idx = np.nanargmin(np.absolute((fnr - fpr)))
+    thresh = threshold[eer_idx]
+    # eer = fpr[eer_idx]
+
+    return thresh, fpr[eer_idx], tpr[eer_idx]
 
 
 fid_VGG16s = prepare_figure(fid=None)
@@ -187,4 +196,48 @@ def compute_attr_embedding(model, path):
     return emb_array
 
 
+def l2_normalize(x, axis=-1, epsilon=1e-10):
+    output = x / np.sqrt(np.maximum(np.sum(np.square(x), axis=axis, keepdims=True), epsilon))
+    return output
+
+
+def compute_embedding(paths, model, batch_size):
+    # Run forward pass to calculate embeddings
+    print('Runnning forward pass on LFW images')
+    num_images = len(paths)
+    num_batches = int(math.ceil(1.0*num_images / batch_size))
+    emb_array = np.zeros((num_images, model.layers[-1].output_shape[-1]))
+
+    import facenet
+    # load images and compute embeddings
+    for i in range(num_batches):
+        start_idx = i*batch_size
+        end_idx = min((i+1)*batch_size, num_images)
+        paths_batch = paths[start_idx:end_idx]
+        images = facenet.load_data(paths_batch, False, False, image_size=160)
+         # test
+#        import scipy.misc
+#        scipy.misc.imsave('./test.jpg',images[1])
+
+        emb_array[start_idx:end_idx,:] = l2_normalize(model.predict(images))
+
+        # test
+#       from scipy.spatial import distance
+#       print(distance.euclidean(emb_array[start_idx], emb_array[start_idx+1]))
+
+    return emb_array
+
+
+def evaluate_verification(emb_all, true_issame, args):
+    import lfw
+
+    # evalute verification performance
+    tpr, fpr, accuracy, val, val_std, far = lfw.evaluate(emb_all, true_issame, nrof_folds=args.lfw_nrof_folds)
+    print('Accuracy: %1.3f+-%1.3f' % (np.mean(accuracy), np.std(accuracy)))
+    print('Validation rate: %2.5f+-%2.5f @ FAR=%2.5f' % (val, val_std, far))
+
+    auc = metrics.auc(fpr, tpr)
+    print('Area Under Curve (AUC): %1.3f' % auc)
+    eer = brentq(lambda x: 1. - x - interpolate.interp1d(fpr, tpr)(x), 0., 1.)
+    print('Equal Error Rate (EER): %1.3f' % eer)
 
