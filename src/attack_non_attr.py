@@ -13,7 +13,7 @@ from cleverhans.attacks import FastGradientMethod
 import facenet
 import lfw
 
-
+"""
 def load_testset(args, size):
   # Load images paths and labels
   pairs = lfw.read_pairs(args.lfw_pairs)
@@ -52,6 +52,7 @@ def load_testset(args, size):
       onehot_labels.append([0, 1])
 
   return faces1, faces2, np.array(onehot_labels)
+"""
 
 
 def load_images(path1, path2):
@@ -92,7 +93,6 @@ class InceptionResnetV1Model(Model):
     distance = tf.reduce_sum(
         tf.square(self.embedding_output - self.victim_embedding_input),
         axis=1)
-    print(distance)
 
     # Convert distance to a softmax vector
     # 0.99 out of 4 is the distance threshold for the Facenet CNN
@@ -110,7 +110,6 @@ class InceptionResnetV1Model(Model):
     self.layers.append(self.softmax_output)
     self.layer_names.append('logits') # 'probs'
 
-
   def fprop(self, x, set_ref=False):
     # print(dict(zip(self.layer_names, self.layers)))
     return dict(zip(self.layer_names, self.layers))
@@ -119,7 +118,7 @@ class InceptionResnetV1Model(Model):
 def run_attack(sess, model, target_faces, adv_faces, adv_x):
     graph = tf.get_default_graph()
     phase_train_placeholder = graph.get_tensor_by_name("phase_train:0")
-    batch_size = graph.get_tensor_by_name("batch_size:0")
+    # batch_size = graph.get_tensor_by_name("batch_size:0")
 
     """
     # test
@@ -136,13 +135,12 @@ def run_attack(sess, model, target_faces, adv_faces, adv_x):
     steps = 1
     adv = adv_faces
     for i in range(steps):
-        print("FGSM step " + str(i + 1))
+        # print("FGSM step " + str(i + 1))
         feed_dict = {model.face_input: adv,
                      model.victim_embedding_input: target_embeddings,
                      phase_train_placeholder: False}
         adv = sess.run(adv_x, feed_dict=feed_dict)
 
-   
     # Prediction with original images
     feed_dict = {model.face_input: adv_faces,
                  model.victim_embedding_input: target_embeddings,
@@ -163,181 +161,67 @@ def run_attack(sess, model, target_faces, adv_faces, adv_x):
 def main(args):
     with tf.Graph().as_default():
       with tf.Session() as sess:
-        # Load model
-        model = InceptionResnetV1Model()
-        # Convert to classifier
-        model.convert_to_classifier() 
+          # Load model
+          model = InceptionResnetV1Model()
+          # Convert to classifier
+          model.convert_to_classifier() 
   
-   #     graph = tf.get_default_graph()
-   #     phase_train_placeholder = graph.get_tensor_by_name("phase_train:0")
-    #    batch_size = graph.get_tensor_by_name("batch_size:0")
+          # Define FGSM for the model
+          steps = 1
+          # eps = args.eps
+          alpha = args.eps / steps
+          fgsm = FastGradientMethod(model)
+          fgsm_params = {'eps': alpha,
+                         'clip_min': 0.,
+                         'clip_max': 1.}
+          adv_x = fgsm.generate(model.face_input, **fgsm_params)
+  
+          # Load images paths and labels
+          pairs = lfw.read_pairs(args.lfw_pairs)
+          paths, true_issame = lfw.get_paths(args.lfw_dir, pairs)
+          path1 = paths[0::2]
+          path2 = paths[1::2]
+          labels = 1 - 1*np.array(true_issame)  # (N, ) array of 0 of 1
+                                                # only in this example, 0: identical, 1: different
+  
+          num_images = len(path1)
+          num_batches = int(math.ceil(1.0*num_images / args.lfw_batch_size))
+  
+          real_labels = []
+          adversarial_labels = []
+          for i in range(num_batches):
+              start_idx = i*args.lfw_batch_size
+              end_idx = min((i+1)*args.lfw_batch_size, num_images)
+  
+              path1_batch = path1[start_idx:end_idx]
+              path2_batch = path2[start_idx:end_idx]
+              # labels_batch = labels[start_idx:end_idx]
+   
+              # Load pairs of faces and their labels in one-hot encoding
+              adv_faces, target_faces = load_images(path1_batch, path2_batch)
+              # adv_faces, target_faces, labels_batch = load_testset(args, 100)
+  
+              # Run attack
+              real_labels_batch, adversarial_labels_batch = run_attack(sess, model, target_faces, adv_faces, adv_x)
+  
+              # Evaluate accuracy
+              real_labels = np.append(real_labels, np.argmax(real_labels_batch, axis=-1))
+              adversarial_labels = np.append(adversarial_labels, np.argmax(adversarial_labels_batch, axis=-1))
 
-        # Define FGSM for the model
-        steps = 1
-        # eps = args.eps
-        alpha = args.eps / steps
-        fgsm = FastGradientMethod(model)
-        fgsm_params = {'eps': alpha,
-                       'clip_min': 0.,
-                       'clip_max': 1.}
-        adv_x = fgsm.generate(model.face_input, **fgsm_params)
+    # Compute accuracy
+    accuracy = np.mean(labels == real_labels)
+    print('Accuracy: ' + str(accuracy * 100) + '%')
 
- 
-        # Load images paths and labels
-        pairs = lfw.read_pairs(args.lfw_pairs)
-        paths, true_issame = lfw.get_paths(args.lfw_dir, pairs)
-        path1 = paths[0::2]
-        path2 = paths[1::2]
-        labels = 1*np.array(true_issame)  # (N, ) array of 0 of 1
+    same_faces_index = np.where((labels == 0))
+    different_faces_index = np.where((labels == 1))
 
-        num_images = len(paths)
-        num_batches = int(math.ceil(1.0*num_images / args.lfw_batch_size))
-    
-        for i in range(num_batches):
-            start_idx = i*args.lfw_batch_size
-            end_idx = min((i+1)*args.lfw_batch_size, num_images)
+    accuracy = np.mean(labels[same_faces_index[0]] == adversarial_labels[same_faces_index[0]])
+    print('Accuracy against adversarial examples for same person faces (dodging): '
+          + str(accuracy * 100) + '%')
 
-            path1_batch = path1[start_idx:end_idx]
-            path2_batch = path2[start_idx:end_idx]
-            labels_batch = labels[start_idx:end_idx]
- 
-            # Load pairs of faces and their labels in one-hot encoding
-            # adv_faces, target_faces = load_images(path1_batch, path2_batch)
-            adv_faces, target_faces, labels_batch = load_testset(args, 100)
-            # Run attack
-            real_labels, adversarial_labels = run_attack(sess, model, target_faces, adv_faces, adv_x)
-
-            ###########
-            # Evaluate accuracy
-            labels_batch = np.argmax(labels_batch, axis=-1)
-            real_labels = np.argmax(real_labels, axis=-1)
-            adversarial_labels = np.argmax(adversarial_labels, axis=-1)
-
-            accuracy = np.mean(labels_batch == real_labels)
-            print('Accuracy: ' + str(accuracy * 100) + '%')
-
-            same_faces_index = np.where((labels_batch == 1))
-            different_faces_index = np.where((labels_batch == 0))
-
-            accuracy = np.mean(labels_batch[same_faces_index[0]] == adversarial_labels[same_faces_index[0]])
-            print('Accuracy against adversarial examples for same person faces (dodging): '
-                  + str(accuracy * 100) + '%')
-
-            accuracy = np.mean(labels_batch[different_faces_index[0]] == adversarial_labels[different_faces_index[0]])
-            print('Accuracy against adversarial examples for different people faces (impersonation): '
-                  + str(accuracy * 100) + '%')
-
-
-"""
-
-           # Create target embeddings using Facenet itself
-            feed_dict = {model.face_input: target_faces, phase_train_placeholder: False}
-            target_embeddings = sess.run(model.embedding_output, feed_dict=feed_dict)
-        
-            # Run attack
-            steps = 1
-            adv = adv_faces
-            for i in range(steps):
-                print("FGSM step " + str(i + 1))
-                feed_dict = {model.face_input: adv,
-                             model.victim_embedding_input: target_embeddings,
-                             phase_train_placeholder: False}
-                adv = sess.run(adv_x, feed_dict=feed_dict)
-        
-        
-            # Prediction with original images
-            feed_dict = {model.face_input: adv_faces,
-                         model.victim_embedding_input: target_embeddings,
-                         phase_train_placeholder: False}
-                         #batch_size: 100}
-            real_labels = sess.run(model.softmax_output, feed_dict=feed_dict)
-        
-            # Prediction with adversarial images
-            feed_dict = {model.face_input: adv,
-                         model.victim_embedding_input: target_embeddings,
-                         phase_train_placeholder: False}
-                         # batch_size: 100}
-            adversarial_labels = sess.run(model.softmax_output, feed_dict=feed_dict)
-"""
-
-
-    
-
-        # Load pairs of faces and their labels in one-hot encoding
-#        faces1, faces2, labels = load_testset(args,150)
-    
-#        # Create victims' embeddings using Facenet itself
-#        graph = tf.get_default_graph()
-#        phase_train_placeholder = graph.get_tensor_by_name("phase_train:0")
-#        feed_dict = {model.face_input: faces2,
-#                     phase_train_placeholder: False}
-#        victims_embeddings = sess.run(
-#            model.embedding_output, feed_dict=feed_dict)
-"""    
-        # Define FGSM for the model
-        steps = 1
-        # eps = args.eps
-        alpha = args.eps / steps
-        fgsm = FastGradientMethod(model)
-        fgsm_params = {'eps': alpha,
-                       'clip_min': 0.,
-                       'clip_max': 1.}
-        adv_x = fgsm.generate(model.face_input, **fgsm_params)
-"""    
-
-        # Run FGSM
-#        adv = faces1
-#        for i in range(steps):
-#          print("FGSM step " + str(i + 1))
-#          feed_dict = {model.face_input: adv,
-#                       model.victim_embedding_input: victims_embeddings,
-#                       phase_train_placeholder: False}
-#          adv = sess.run(adv_x, feed_dict=feed_dict)
-    
-        # Test accuracy of the model
-        # batch_size = graph.get_tensor_by_name("batch_size:0")
-    
-#        feed_dict = {model.face_input: faces1,
-#                     model.victim_embedding_input: victims_embeddings,
-#                     phase_train_placeholder: False,
-#                     batch_size: 64}
-#        real_labels = sess.run(model.softmax_output, feed_dict=feed_dict)
-    
-#        accuracy = np.mean(
-#            (np.argmax(labels, axis=-1)) == (np.argmax(real_labels, axis=-1))
-#        )
-#        print('Accuracy: ' + str(accuracy * 100) + '%')
-    
-        # Test accuracy against adversarial examples
-#        feed_dict = {model.face_input: adv,
-#                     model.victim_embedding_input: victims_embeddings,
-#                     phase_train_placeholder: False,
-#                     batch_size: 64}
-#        adversarial_labels = sess.run(
-#            model.softmax_output, feed_dict=feed_dict)
-"""    
-        same_faces_index = np.where((np.argmax(labels, axis=-1) == 0))
-        different_faces_index = np.where((np.argmax(labels, axis=-1) == 1))
-    
-        accuracy = np.mean(
-            (np.argmax(labels[same_faces_index], axis=-1)) ==
-            (np.argmax(adversarial_labels[same_faces_index], axis=-1))
-        )
-        print('Accuracy against adversarial examples for '
-              + 'same person faces (dodging): '
-              + str(accuracy * 100)
-              + '%')
-    
-        accuracy = np.mean(
-            (np.argmax(labels[different_faces_index], axis=-1)) == (
-                np.argmax(adversarial_labels[different_faces_index], axis=-1))
-        )
-        print('Accuracy against adversarial examples for '
-              + 'different people faces (impersonation): '
-              + str(accuracy * 100)
-              + '%')
-    
-"""
+    accuracy = np.mean(labels[different_faces_index[0]] == adversarial_labels[different_faces_index[0]])
+    print('Accuracy against adversarial examples for different people faces (impersonation): '
+          + str(accuracy * 100) + '%')
 
 
 def parse_arguments(argv):
