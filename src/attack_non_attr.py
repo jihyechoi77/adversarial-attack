@@ -9,7 +9,7 @@ import sys
 import argparse
 import math
 from cleverhans.model import Model
-from cleverhans.attacks import FastGradientMethod
+from cleverhans.attacks import FastGradientMethod, CarliniWagnerL2
 import facenet
 import lfw
 
@@ -108,11 +108,39 @@ class InceptionResnetV1Model(Model):
     self.layer_names = []
     self.layers = []
     self.layers.append(self.softmax_output)
-    self.layer_names.append('logits') # 'probs'
+    self.layer_names.append('logits')  # 'probs'
 
   def fprop(self, x, set_ref=False):
     # print(dict(zip(self.layer_names, self.layers)))
     return dict(zip(self.layer_names, self.layers))
+
+
+def prepare_attack(sess, args, model):
+    if args.attack_type == 'FGSM':
+        # Define FGSM for the model
+        steps = 1
+        # eps = args.eps
+        alpha = args.eps / steps
+        fgsm = FastGradientMethod(model)
+        fgsm_params = {'eps': alpha,
+                       'clip_min': 0.,
+                       'clip_max': 1.}
+        adv_x = fgsm.generate(model.face_input, **fgsm_params)
+    elif args.attack_type == 'CW':
+        source_samples = 100
+        print('Crafting ' + str(source_samples) + ' adversarial examples')
+        print("This could take some time ...")
+
+        # Instantiate a CW attack object
+        cw = CarliniWagnerL2(model, sess=sess)
+        cw_params = {'binary_search_steps': 1,
+                     'max_iterations': 100,
+                     'learning_rate': .2,
+                     'batch_size': source_samples,
+                     'initial_const': 10}
+        adv_x = cw.generate(model.face_input, **cw_params)
+
+    return adv_x
 
 
 def run_attack(sess, model, target_faces, adv_faces, adv_x):
@@ -166,15 +194,7 @@ def main(args):
           # Convert to classifier
           model.convert_to_classifier() 
   
-          # Define FGSM for the model
-          steps = 1
-          # eps = args.eps
-          alpha = args.eps / steps
-          fgsm = FastGradientMethod(model)
-          fgsm_params = {'eps': alpha,
-                         'clip_min': 0.,
-                         'clip_max': 1.}
-          adv_x = fgsm.generate(model.face_input, **fgsm_params)
+          adv_x = prepare_attack(sess, args, model)
   
           # Load images paths and labels
           pairs = lfw.read_pairs(args.lfw_pairs)
@@ -182,7 +202,7 @@ def main(args):
           path1 = paths[0::2]
           path2 = paths[1::2]
           labels = 1 - 1*np.array(true_issame)  # (N, ) array of 0 of 1
-                                                # only in this example, 0: identical, 1: different
+                                                # for this example, 0: identical, 1: different
   
           num_images = len(path1)
           num_batches = int(math.ceil(1.0*num_images / args.lfw_batch_size))
@@ -235,6 +255,7 @@ def parse_arguments(argv):
         help='The file containing the pairs to use for validation.', default='../data/lfw-view2_pairs.txt')
     parser.add_argument('--lfw_nrof_folds', type=int, help='Number of folds to use for cross validation. Mainly used for testing.', default=10)
     parser.add_argument('--model_path', type=str, help='Type of non-attribute based model to be evaluated.', default='facenet')
+    parser.add_argument('--attack_type', type=str, help='Type of the attack method: FGSM or CW', default='CW')
     parser.add_argument('--eps', type=float, help='Norm of adversarial perturbation.', default=0.01)
     return parser.parse_args(argv)
 
