@@ -16,47 +16,6 @@ from keras.utils import to_categorical
 import facenet
 import lfw
 
-"""
-def load_testset(args, size):
-  # Load images paths and labels
-  pairs = lfw.read_pairs(args.lfw_pairs)
-  paths, labels = lfw.get_paths(args.lfw_dir, pairs)
-  image_size = 160
-
-  # Random choice
-  permutation = np.random.choice(len(labels), size, replace=False)
-  paths_batch_1 = []
-  paths_batch_2 = []
-
-  for index in permutation:
-    paths_batch_1.append(paths[index * 2])
-    paths_batch_2.append(paths[index * 2 + 1])
-
-  labels = np.asarray(labels)[permutation]
-  paths_batch_1 = np.asarray(paths_batch_1)
-  paths_batch_2 = np.asarray(paths_batch_2)
-
-  # Load images
-  faces1 = facenet.load_data(paths_batch_1, False, False, image_size)
-  faces2 = facenet.load_data(paths_batch_2, False, False, image_size)
-
-  # Change pixel values to 0 to 1 values
-  min_pixel = min(np.min(faces1), np.min(faces2))
-  max_pixel = max(np.max(faces1), np.max(faces2))
-  faces1 = (faces1 - min_pixel) / (max_pixel - min_pixel)
-  faces2 = (faces2 - min_pixel) / (max_pixel - min_pixel)
-
-  # Convert labels to one-hot vectors
-  onehot_labels = []
-  for index in range(len(labels)):
-    if labels[index]:
-      onehot_labels.append([1, 0])
-    else:
-      onehot_labels.append([0, 1])
-
-  return faces1, faces2, np.array(onehot_labels)
-"""
-
 
 def load_images(path1, path2):
 
@@ -196,7 +155,6 @@ def prepare_attack(sess, args, model, adv_input, target_embeddings):
 
 
 def run_attack(sess, model, adv_x, adv_faces, feed_dict):
-    graph = tf.get_default_graph()
 
     """
     # test
@@ -223,46 +181,14 @@ def run_attack(sess, model, adv_x, adv_faces, feed_dict):
     return benign_labels, adversarial_labels  
 
 
-def run_carlini(sess, model, target_embeddings, adv_faces, labels):
-    from l2_attack import CarliniL2
-    graph = tf.get_default_graph()
-    # phase_train_placeholder = graph.get_tensor_by_name("phase_train:0")
-    # batch_size_placeholder = graph.get_tensor_by_name("batch_size:0")
-
-    cw = CarliniL2(sess, model, attack_batch_size=10, max_iterations=10, confidence=0, # max_iteration=1000
-                       feed_dict={model.batch_size: 10, model.phase_train: False,
-                                  model.victim_embedding_input: target_embeddings})
-    # cw = CarliniL0(sess, model, max_iterations=1000, initial_const=10,
-    #                   largest_const=15)
-
-    # inputs, targets = generate_data(adv_faces, to_categorical(labels, num_classes=2),
-    #                                samples=10, targeted=True, start=0, inception=False)
-    # adv = cw.attack(inputs, targets)
-    adv = cw.attack(adv_faces, to_categorical(labels, num_classes=2))
-    feed_dict = {model.face_input: adv, model.victim_embedding_input: target_embeddings,
-                 model.phase_train: False}
-    # batch_size: 100}
-    adversarial_labels = sess.run(model.softmax_output, feed_dict=feed_dict)
-
-    return adv
-
-
 def main(args):
     with tf.Graph().as_default():
       with tf.Session() as sess:
-          # Obtain Image Parameters
-          # img_rows, img_cols, nchannels = adv_faces.shape[1:4]
-          # nb_classes = labels_batch.shape[1]
-
-          # Define input TF placeholder
-          x = tf.placeholder(tf.float32, shape=(None, 160, 160, 3), name='x')
-          y = tf.placeholder(tf.float32, shape=(None, 2), name='y')
 
           # Load model
           model = InceptionResnetV1Model()
           # Convert to classifier
           model.convert_to_classifier()
-          preds = model.softmax_output
 
           # Load images paths and labels
           pairs = lfw.read_pairs(args.lfw_pairs)
@@ -270,7 +196,7 @@ def main(args):
           path1 = paths[0::2]
           path2 = paths[1::2]
           labels = 1 - 1*np.array(true_issame)  # (N, ) array of 0 of 1
-                                                # for this example, 0: identical, 1: different
+                                                # NOTE! for this example, 0: identical, 1: different
   
           num_images = len(path1)
           num_batches = int(math.ceil(1.0*num_images / args.lfw_batch_size))
@@ -287,16 +213,23 @@ def main(args):
    
               # Load pairs of faces and their labels in one-hot encoding
               adv_faces, target_faces = load_images(path1_batch, path2_batch)
-              # adv_faces, target_faces, labels_batch = load_testset(args, 100)
 
               # Create target embeddings using Facenet itself
               feed_dict = {model.face_input: target_faces, model.phase_train: False}
               target_embeddings = sess.run(model.embedding_output, feed_dict=feed_dict)
 
-              #######################################################################
               # Run attack
-              #######################################################################
+              feed_dict = {model.face_input: adv_faces, model.victim_embedding_input: target_embeddings,
+                           model.batch_size: 10, model.phase_train: False}
+              adv_x = prepare_attack(sess, args, model, adv_faces, target_embeddings)
+              real_labels_batch, adversarial_labels_batch = run_attack(sess, model, adv_x, adv_faces, feed_dict)
+
               """
+              # Define input TF placeholder
+              x = tf.placeholder(tf.float32, shape=(None, 160, 160, 3), name='x')
+              y = tf.placeholder(tf.float32, shape=(None, 2), name='y')
+              preds = model.softmax_output
+
               # Evaluate the accuracy on legitimate test examples
               feed_dict = {model.face_input: adv_faces, model.victim_embedding_input: target_embeddings,
                            model.batch_size: 10, model.phase_train: False}
@@ -318,21 +251,6 @@ def main(args):
                            model.batch_size: 10, model.phase_train: False}
               accur = model_eval(sess, x, y, preds, adv, labels_batch,
                                  feed=feed_dict, args={'batch_size': args.lfw_batch_size})
-              """
-
-              adv_x = prepare_attack(sess, args, model, adv_faces, target_embeddings)
-              real_labels_batch, adversarial_labels_batch = run_attack(sess, model, adv_x, adv_faces, feed_dict)
-              """
-              ## option 2)
-              adv_x = prepare_attack(sess, args, model, adv_input=adv_faces)
-              # Define input TF placeholder
-              x = tf.placeholder(tf.float32, shape=(None, 160, 160, 3))
-              y = tf.placeholder(tf.float32, shape=(None, 2))
-              from cleverhans.utils_tf import model_eval
-              err = model_eval(sess, x, y, model.softmax_output, adv_x, labels_batch,
-                               feed={model.victim_embedding_input: target_embeddings},
-                               args={'batch_size': 10})
-              adv_accuracy = 1 - err
               """
 
               # Evaluate accuracy
