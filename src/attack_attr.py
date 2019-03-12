@@ -12,15 +12,18 @@ import math
 from sklearn.model_selection import KFold
 from keras import backend as K
 from cleverhans.model import Model
-from cleverhans.attacks import FastGradientMethod, CarliniWagnerL2
+from cleverhans.attacks import FastGradientMethod, CarliniWagnerL2, Noise
 from cleverhans.utils_tf import model_eval
 from keras.utils import to_categorical
 from keras.models import load_model
 import facenet
 import lfw
+from attack_utils import evaluate
 
 
 def load_images(path1, path2):
+
+    """
     # Load images
     faces1 = facenet.load_data(path1, False, False, image_size=160)
     faces2 = facenet.load_data(path2, False, False, image_size=160)
@@ -28,8 +31,17 @@ def load_images(path1, path2):
     # Change pixel values to 0 to 1 values
     min_pixel = min(np.min(faces1), np.min(faces2))
     max_pixel = max(np.max(faces1), np.max(faces2))
-    faces1 = (faces1 - min_pixel) / (max_pixel - min_pixel) - 0.5
-    faces2 = (faces2 - min_pixel) / (max_pixel - min_pixel) - 0.5
+    faces1 = (faces1 - min_pixel) / (max_pixel - min_pixel)
+    faces2 = (faces2 - min_pixel) / (max_pixel - min_pixel)
+    """
+
+    from keras.preprocessing.image import load_img, img_to_array
+    faces1 = np.empty((len(path1), 160, 160, 3))
+    faces2 = np.empty((len(path2), 160, 160, 3))
+    for i, ID in enumerate(path1):
+        # Store sample
+        faces1[i,] = img_to_array(load_img(ID)) / 255
+        faces2[i,] = img_to_array(load_img(path2[i])) / 255
 
     return faces1, faces2
 
@@ -92,15 +104,23 @@ def prepare_attack(sess, args, model, adv_input, target_embeddings):
         model.face_input.set_shape(np.shape(adv_input))
         # Instantiate a CW attack object
         cw = CarliniWagnerL2(model, sess)
-        cw_params = {'binary_search_steps': 0,  # 1
-                     'max_iterations': 0,  # 100
-                     'learning_rate': .1,  # .2
+        cw_params = {'binary_search_steps': 1,  # 1
+                     'max_iterations': 1,  # 100
+                     'learning_rate': .2,  # .2
                      'batch_size': args.lfw_batch_size,
-                     'initial_const': 10}  # initial_const: 10, The initial tradeoff-constant to use to tune the
-        # relative importance of size of the perturbation confidence of classification
+                     'initial_const': args.init_c, # 10
+                     'confidence': 10,
+                     'clip_min': -1,
+                     'clip_max': 1}
         feed_dict = {model.face_input: adv_input, model.victim_embedding_input: target_embeddings}
                      # model.batch_size: 10, model.phase_train: False}
         adv_x = cw.generate(model.face_input, feed_dict, **cw_params)
+    elif args.attack_type == 'random':
+        random_attack = Noise(model, sess)
+        noise_params = {'eps': 0.1,
+                        'ord': np.inf,
+                        'clip_min': 0, 'clip_max': 1}
+        adv_x = random_attack.generate(model.face_input, **noise_params)
 
     return adv_x
 
@@ -131,22 +151,6 @@ def run_attack(sess, model, adv_x, adv_faces, feed_dict):
     return benign_labels, adversarial_labels
 
 
-def evaluate(true_labels, real_labels, adversarial_labels):
-    accuracy = np.mean(true_labels == real_labels)
-    print('Accuracy: ' + str(accuracy * 100) + '%')
-
-    same_faces_index = np.where((true_labels == 0))
-    different_faces_index = np.where((true_labels == 1))
-
-    accuracy = np.mean(true_labels[same_faces_index[0]] == adversarial_labels[same_faces_index[0]])
-    print('Accuracy against adversarial examples for same person faces (dodging): '
-          + str(accuracy * 100) + '%')
-
-    accuracy = np.mean(true_labels[different_faces_index[0]] == adversarial_labels[different_faces_index[0]])
-    print('Accuracy against adversarial examples for different people faces (impersonation): '
-          + str(accuracy * 100) + '%')
-
-
 def main(args):
     with tf.Graph().as_default():
         with tf.Session() as sess:
@@ -168,13 +172,17 @@ def main(args):
             indices = np.arange(np.shape(path1_all)[0])
             real_labels = []
             adversarial_labels = []
+            labels_evaluated = []
 
             for ith_fold, (_, fold_idx) in enumerate(k_fold.split(indices)):
                 if ith_fold == args.lfw_nrof_folds:
                     break
 
+                fold_idx = np.append(fold_idx[:50], fold_idx[-50:])
+
                 path1 = [path1_all[i] for i in fold_idx]
                 path2 = [path2_all[i] for i in fold_idx]
+                labels_evaluated = np.append(labels_evaluated, [labels_all[i] for i in fold_idx], axis=-1)
                 # labels = labels_all[fold_idx]
                 num_images = len(path1)
                 num_batches = int(math.ceil(1.0 * num_images / args.lfw_batch_size))
@@ -234,8 +242,9 @@ def main(args):
                     adversarial_labels = np.append(adversarial_labels, np.argmax(adversarial_labels_batch, axis=-1))
 
     # Compute accuracy
-    labels_evaluated = labels_all[:fold_idx[0]]  # true labels that belong to 0~N folds
+    # labels_evaluated = labels_all[:fold_idx[0]]  # true labels that belong to 0~N folds
     evaluate(labels_evaluated, real_labels, adversarial_labels)
+    # evaluate(labels_evaluated[:100], real_labels, adversarial_labels)
 
 
 def parse_arguments(argv):
@@ -246,16 +255,17 @@ def parse_arguments(argv):
     parser.add_argument('--lfw_file_ext', type=str,
                         help='The file extension for the LFW dataset.', default='jpg', choices=['jpg', 'png'])
     parser.add_argument('--lfw_batch_size', type=int,
-                        help='Number of images to process in a batch in the LFW test set.', default=100)
+                        help='Number of images to process in a batch in the LFW test set.', default=1)
     parser.add_argument('--lfw_pairs', type=str,
                         help='The file containing the pairs to use for validation.',
                         default='../data/lfw-view2_pairs.txt')
     parser.add_argument('--lfw_nrof_folds', type=int,
-                        help='Number of folds to use for cross validation. Mainly used for testing.', default=2)
+                        help='Number of folds to use for cross validation. Mainly used for testing.', default=1)
     parser.add_argument('--model_path', type=str, help='Type of non-attribute based model to be evaluated.',
                         default='facenet')
-    parser.add_argument('--attack_type', type=str, help='Type of the attack method: FGSM or CW', default='CW')
-    parser.add_argument('--eps', type=float, help='Norm of adversarial perturbation.', default=0.01)
+    parser.add_argument('--attack_type', type=str, help='Type of the attack method: FGSM, CW or random', default='random')
+    parser.add_argument('--eps', type=float, help='FGSM: Norm of adversarial perturbation.', default=0.01)
+    parser.add_argument('--init_c', type=float, help='CW: Initial tradeoff-constant to use to tune the relative importance of size of the perturbation confidence of classification', default=1000)
     return parser.parse_args(argv)
 
 
