@@ -16,9 +16,10 @@ from cleverhans.attacks import FastGradientMethod, CarliniWagnerL2, Noise
 from cleverhans.utils_tf import model_eval
 from keras.utils import to_categorical
 from keras.models import load_model
+from keras.models import Model as KModel
 import facenet
 import lfw
-from attack_utils import evaluate
+from attack_utils import run_attack, evaluate
 
 
 def load_images(path1, path2):
@@ -78,13 +79,17 @@ class AttributeModel(Model):
         # Load verifier trained on LFW View1
         K.set_learning_phase(False)  # inference not training
         verifier = load_model(self.verifier_path)
+        logit_layer_model = KModel(inputs=verifier.input, outputs=verifier.layers[-1].input)
+        self.logits = logit_layer_model(feat)
         self.softmax_output = verifier(feat)
 
         # Save softmax layer
         self.layer_names = []
         self.layers = []
+        self.layers.append(self.logits)
+        self.layer_names.append('logits')
         self.layers.append(self.softmax_output)
-        self.layer_names.append('logits')  # 'probs'
+        self.layer_names.append('probs')  # 'probs' not 'logits'
 
     def fprop(self, x, set_ref=False):
         return dict(zip(self.layer_names, self.layers))
@@ -117,38 +122,12 @@ def prepare_attack(sess, args, model, adv_input, target_embeddings):
         adv_x = cw.generate(model.face_input, feed_dict, **cw_params)
     elif args.attack_type == 'random':
         random_attack = Noise(model, sess)
-        noise_params = {'eps': 0.1,
+        noise_params = {'eps': args.eps,
                         'ord': np.inf,
                         'clip_min': 0, 'clip_max': 1}
         adv_x = random_attack.generate(model.face_input, **noise_params)
 
     return adv_x
-
-
-def run_attack(sess, model, adv_x, adv_faces, feed_dict):
-    """
-    # test
-    import scipy.misc
-    scipy.misc.imsave('./target.jpg', target_faces[1])
-    scipy.misc.imsave('./adv.jpg', adv_faces[1])
-    """
-
-    # Run attack
-    steps = 1
-    adv = adv_faces
-    for i in range(steps):
-        # print("FGSM step " + str(i + 1))
-        adv = sess.run(adv_x, feed_dict=feed_dict)
-    #        adv = sess.run(adv_x)
-
-    # Prediction with original images
-    benign_labels = sess.run(model.softmax_output, feed_dict)
-
-    # Prediction with adversarial images
-    feed_dict[model.face_input] = adv
-    adversarial_labels = sess.run(model.softmax_output, feed_dict)
-
-    return benign_labels, adversarial_labels
 
 
 def main(args):
@@ -206,7 +185,7 @@ def main(args):
                     feed_dict = {model.face_input: adv_faces, model.victim_embedding_input: target_embeddings} #,
                                  #model.batch_size: 10, model.phase_train: False}
                     adv_x = prepare_attack(sess, args, model, adv_faces, target_embeddings)
-                    real_labels_batch, adversarial_labels_batch = run_attack(sess, model, adv_x, adv_faces, feed_dict)
+                    real_labels_batch, adversarial_labels_batch = run_attack(sess, model, adv_x, feed_dict)
 
                     """
                 # Define input TF placeholder
@@ -242,9 +221,7 @@ def main(args):
                     adversarial_labels = np.append(adversarial_labels, np.argmax(adversarial_labels_batch, axis=-1))
 
     # Compute accuracy
-    # labels_evaluated = labels_all[:fold_idx[0]]  # true labels that belong to 0~N folds
     evaluate(labels_evaluated, real_labels, adversarial_labels)
-    # evaluate(labels_evaluated[:100], real_labels, adversarial_labels)
 
 
 def parse_arguments(argv):
@@ -255,7 +232,7 @@ def parse_arguments(argv):
     parser.add_argument('--lfw_file_ext', type=str,
                         help='The file extension for the LFW dataset.', default='jpg', choices=['jpg', 'png'])
     parser.add_argument('--lfw_batch_size', type=int,
-                        help='Number of images to process in a batch in the LFW test set.', default=1)
+                        help='Number of images to process in a batch in the LFW test set.', default=100)
     parser.add_argument('--lfw_pairs', type=str,
                         help='The file containing the pairs to use for validation.',
                         default='../data/lfw-view2_pairs.txt')
@@ -263,9 +240,10 @@ def parse_arguments(argv):
                         help='Number of folds to use for cross validation. Mainly used for testing.', default=1)
     parser.add_argument('--model_path', type=str, help='Type of non-attribute based model to be evaluated.',
                         default='facenet')
-    parser.add_argument('--attack_type', type=str, help='Type of the attack method: FGSM, CW or random', default='random')
-    parser.add_argument('--eps', type=float, help='FGSM: Norm of adversarial perturbation.', default=0.01)
-    parser.add_argument('--init_c', type=float, help='CW: Initial tradeoff-constant to use to tune the relative importance of size of the perturbation confidence of classification', default=1000)
+    parser.add_argument('--attack_type', type=str, help='Type of the attack method: FGSM, CW or random', default='FGSM')
+    parser.add_argument('--eps', type=float, help='FGSM or random: Norm of adversarial perturbation.', default=0.1)
+    parser.add_argument('--init_c', type=float, help='CW: Initial tradeoff-constant to use to tune the relative importance of size of the perturbation confidence of classification',
+                        default=10)
     return parser.parse_args(argv)
 
 
