@@ -110,16 +110,18 @@ def prepare_attack(sess, args, model, adv_input, target_embeddings):
         # Instantiate a CW attack object
         cw = CarliniWagnerL2(model, sess)
         cw_params = {'binary_search_steps': 1,  # 1
-                     'max_iterations': 1,  # 100
+                     'max_iterations': 100,  # 100
                      'learning_rate': .2,  # .2
                      'batch_size': args.lfw_batch_size,
                      'initial_const': args.init_c, # 10
-                     'confidence': 10,
-                     'clip_min': -1,
-                     'clip_max': 1}
+                     'confidence': 10}
+        #              # model.batch_size: 10, model.phase_train: False}
         feed_dict = {model.face_input: adv_input, model.victim_embedding_input: target_embeddings}
-                     # model.batch_size: 10, model.phase_train: False}
-        adv_x = cw.generate(model.face_input, feed_dict, **cw_params)
+        #              # model.batch_size: 10, model.phase_train: False}
+        # adv_x = cw.generate(model.face_input, feed_dict, **cw_params)
+        adv_x = cw.generate(model.face_input, **cw_params)
+        # adv_x = cw.generate_np(adv_input, **cw_params)
+        print('hello')
     elif args.attack_type == 'random':
         random_attack = Noise(model, sess)
         noise_params = {'eps': args.eps,
@@ -232,7 +234,7 @@ def parse_arguments(argv):
     parser.add_argument('--lfw_file_ext', type=str,
                         help='The file extension for the LFW dataset.', default='jpg', choices=['jpg', 'png'])
     parser.add_argument('--lfw_batch_size', type=int,
-                        help='Number of images to process in a batch in the LFW test set.', default=100)
+                        help='Number of images to process in a batch in the LFW test set.', default=10)
     parser.add_argument('--lfw_pairs', type=str,
                         help='The file containing the pairs to use for validation.',
                         default='../data/lfw-view2_pairs.txt')
@@ -240,8 +242,8 @@ def parse_arguments(argv):
                         help='Number of folds to use for cross validation. Mainly used for testing.', default=1)
     parser.add_argument('--model_path', type=str, help='Type of non-attribute based model to be evaluated.',
                         default='facenet')
-    parser.add_argument('--attack_type', type=str, help='Type of the attack method: FGSM, CW or random', default='FGSM')
-    parser.add_argument('--eps', type=float, help='FGSM or random: Norm of adversarial perturbation.', default=0.1)
+    parser.add_argument('--attack_type', type=str, help='Type of the attack method: FGSM, CW or random', default='CW')
+    parser.add_argument('--eps', type=float, help='FGSM or random: Norm of adversarial perturbation.', default=0.9)
     parser.add_argument('--init_c', type=float, help='CW: Initial tradeoff-constant to use to tune the relative importance of size of the perturbation confidence of classification',
                         default=10)
     return parser.parse_args(argv)
